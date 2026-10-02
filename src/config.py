@@ -25,6 +25,10 @@ class AppConfig(BaseSettings):
             take before it is forced to stop. This is a safety limit that
             guards against infinite reasoning loops and runaway token cost.
             Read from the ``MAX_AGENT_STEPS`` environment variable.
+        ollama_base_url: Address of the Ollama server. The default works when
+            Ollama runs on the same machine. Inside Docker, point it at the
+            host, for example ``http://host.docker.internal:11434``. Read from
+            the ``OLLAMA_BASE_URL`` environment variable.
         data_path: Filesystem path to the sales dataset (a CSV file) that the
             tools load and query. Read from the ``DATA_PATH`` environment
             variable.
@@ -40,6 +44,11 @@ class AppConfig(BaseSettings):
         default="llama3.2",
         validation_alias="OLLAMA_MODEL",
         description="Name of the local Ollama model to drive the agent.",
+    )
+    ollama_base_url: str = Field(
+        default="http://localhost:11434",
+        validation_alias="OLLAMA_BASE_URL",
+        description="Address of the Ollama server.",
     )
     max_agent_steps: int = Field(
         default=6,
