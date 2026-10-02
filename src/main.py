@@ -9,6 +9,11 @@ The CLI runs the agent on the supplied question and prints two things:
    arguments) and tool result, in the order they occurred.
 2. The final answer produced by the agent.
 
+Use ``--mode multi`` to run the multi-agent supervisor system from
+:mod:`src.multi_agent` instead of the single ReAct agent:
+
+    uv run python -m src.main --mode multi --question "How much revenue came from the North region, and what is the median revenue?"
+
 Printing the whole trace makes the ReAct loop transparent, which is useful for
 learning and for debugging tool selection.
 """
@@ -26,6 +31,7 @@ from langchain_core.messages import (
 from langgraph.errors import GraphRecursionError
 
 from src.agent import build_agent, recursion_limit_for
+from src.multi_agent import build_default_multi_agent
 from src.config import get_config
 
 
@@ -54,7 +60,8 @@ def format_message(message: BaseMessage, index: int) -> str:
             for call in tool_calls:
                 lines.append(f"    calls: {call['name']}({call['args']})")
         else:
-            lines.append(f"[{index}] AGENT ANSWER")
+            label = f"AGENT ANSWER ({message.name})" if message.name else "AGENT ANSWER"
+            lines.append(f"[{index}] {label}")
             lines.append(f"    {message.content}")
     elif isinstance(message, ToolMessage):
         lines.append(f"[{index}] TOOL RESULT ({message.name})")
@@ -66,22 +73,27 @@ def format_message(message: BaseMessage, index: int) -> str:
     return "\n".join(lines)
 
 
-def run(question: str) -> None:
+def run(question: str, mode: str = "single") -> None:
     """Execute the agent on a question and print the trace and final answer.
 
     Args:
         question: The natural language analytics question to answer.
+        mode: ``"single"`` runs one ReAct agent with all four tools.
+            ``"multi"`` runs the supervisor with two specialist agents.
     """
 
     config = get_config()
-    agent = build_agent(config)
+    agent = build_default_multi_agent(config) if mode == "multi" else build_agent(config)
 
     inputs = {"messages": [HumanMessage(content=question)]}
     graph_config = {"recursion_limit": recursion_limit_for(config)}
 
     print("=" * 70)
     print(f"QUESTION: {question}")
-    print(f"MODEL: {config.ollama_model}   MAX STEPS: {config.max_agent_steps}")
+    print(
+        f"MODE: {mode}   MODEL: {config.ollama_model}   "
+        f"MAX STEPS: {config.max_agent_steps}"
+    )
     print("=" * 70)
 
     try:
@@ -121,8 +133,14 @@ def main() -> None:
         required=True,
         help="The natural language question to ask the agent.",
     )
+    parser.add_argument(
+        "--mode",
+        choices=["single", "multi"],
+        default="single",
+        help="'single' for one ReAct agent, 'multi' for the supervisor system.",
+    )
     args = parser.parse_args()
-    run(args.question)
+    run(args.question, mode=args.mode)
 
 
 if __name__ == "__main__":
