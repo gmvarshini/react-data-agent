@@ -1,4 +1,4 @@
-# React Data Agent
+# LangGraph ReAct Multi-Agent System
 
 A ReAct style agent for data analysis, built with LangGraph and a local Ollama
 model. It runs in two modes: a single ReAct agent, or a multi-agent system
