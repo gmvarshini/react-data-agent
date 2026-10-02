@@ -75,7 +75,11 @@ def build_agent(config: AppConfig | None = None) -> CompiledStateGraph:
 
     # temperature=0 keeps tool selection and answers deterministic, which is
     # important for a reasoning agent that should not improvise numbers.
-    model = ChatOllama(model=settings.ollama_model, temperature=0)
+    model = ChatOllama(
+        model=settings.ollama_model,
+        base_url=settings.ollama_base_url,
+        temperature=0,
+    )
 
     return create_react_agent(
         model,
