@@ -1,7 +1,8 @@
 # React Data Agent
 
 A ReAct style agent for data analysis, built with LangGraph and a local Ollama
-model. You ask a plain English question about a sales dataset, and the agent
+model. It runs in two modes: a single ReAct agent, or a multi-agent system
+where a supervisor routes work to two specialist agents. You ask a plain English question about a sales dataset, and the agent
 reasons step by step, calls purpose built tools to query the data, and returns
 a precise, data backed answer along with the full trace of how it got there.
 
@@ -52,6 +53,52 @@ Each tool declares a Pydantic input schema and a descriptive docstring. The
 model selects a tool based only on these descriptions and schemas, so the
 wording is part of the design (see the note on prompt and schema design below).
 
+## Multi-agent mode: a supervisor and two specialists
+
+The single agent sees all four tools. The multi-agent mode
+(`src/multi_agent.py`) splits the work into a small team instead:
+
+| Agent | Role | Tools |
+| --- | --- | --- |
+| `supervisor` | Reads the question, decides who acts next, and writes the final answer. Never analyses data itself. | none |
+| `segment_analyst` | Questions about one region or comparing product categories. | `filter_by_region`, `aggregate_by_category` |
+| `statistics_analyst` | Questions about the overall distribution or the best individual sales. | `compute_summary_statistics`, `find_top_performers` |
+
+Each specialist is its own small ReAct agent. The graph is:
+
+```
+START -> supervisor -> segment_analyst    -> supervisor
+                    -> statistics_analyst -> supervisor
+                    -> END (when the supervisor chooses FINISH)
+```
+
+The supervisor uses structured output (a Pydantic `Route` model) so its
+decision is always one of `segment_analyst`, `statistics_analyst` or `FINISH`.
+
+**Why split the work?** Fewer tools per agent means shorter prompts and fewer
+wrong tool choices. A question with two parts, such as "How much revenue came
+from the North region, and what is the median revenue?", is handled by two
+specialists, one after the other.
+
+**Context engineering.** A specialist adds only its short final report to the
+shared state, not every internal tool call. This keeps the supervisor's context
+small and focused.
+
+**Tradeoffs.** More agents means more model calls, so answers are slower, and
+there are more places where something can go wrong. For simple questions the
+single agent is often enough.
+
+Run it with:
+
+```bash
+uv run python -m src.main --mode multi --question "How much revenue came from the North region, and what is the median revenue?"
+```
+
+The graph logic is tested without a language model: `tests/test_multi_agent.py`
+replaces the supervisor's decisions and the specialists with simple fakes and
+checks routing, finishing, the step limit, and that every tool belongs to
+exactly one specialist.
+
 ## Example questions
 
 - Which product category has the highest total revenue?
@@ -89,6 +136,7 @@ object:
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `OLLAMA_MODEL` | `llama3.2` | Local Ollama model that drives the agent. |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Address of the Ollama server. |
 | `MAX_AGENT_STEPS` | `6` | Maximum reasoning and tool steps before the agent stops. |
 | `DATA_PATH` | `./data/sales_data.csv` | Path to the sales dataset. |
 
@@ -108,6 +156,24 @@ uv run pytest
 
 The tests exercise each tool against a small fixture dataset with known
 expected values, so they run quickly and do not require Ollama.
+
+## CI/CD with GitHub Actions
+
+The workflow in `.github/workflows/tests.yml` has two jobs:
+
+1. **CI (`test`).** On every push and pull request to `main`: install the
+   dependencies with uv, lint with ruff, and run pytest. A failing check marks
+   the commit red.
+2. **CD (`publish`).** Only after the tests pass on a push to `main`: build the
+   Docker image and publish it to the GitHub Container Registry as
+   `ghcr.io/<owner>/react-data-agent`, tagged `latest` and with the commit id.
+
+Run the published image (Ollama must be running on your machine):
+
+```bash
+docker run --rm --add-host=host.docker.internal:host-gateway \
+  ghcr.io/<owner>/react-data-agent --question "Which product category has the highest total revenue?"
+```
 
 ## Worked example
 
@@ -198,9 +264,14 @@ react-data-agent/
 │   ├── config.py             # Typed application configuration
 │   ├── tools.py              # The four analysis tools
 │   ├── agent.py              # LangGraph ReAct agent construction
+│   ├── multi_agent.py        # Supervisor + two specialist agents
 │   └── main.py               # Command line interface
 ├── tests/
-│   └── test_tools.py         # Tool unit tests against a known fixture
+│   ├── test_tools.py         # Tool unit tests against a known fixture
+│   └── test_multi_agent.py   # Supervisor graph tests with fake agents
+├── .github/workflows/
+│   └── tests.yml             # CI (ruff + pytest) and CD (Docker image)
+├── Dockerfile                # Container image for the agent CLI
 ├── .env.example
 ├── pyproject.toml
 └── README.md
